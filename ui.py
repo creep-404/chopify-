@@ -64,8 +64,9 @@ class StageProgress:
 class ProgressTracker:
     """Tracks progress across all pipeline stages and calculates ETA."""
     
-    def __init__(self, gr_progress: Optional[gr.Progress] = None):
+    def __init__(self, gr_progress: Optional[gr.Progress] = None, status_queue=None):
         self.gr_progress = gr_progress
+        self.status_queue = status_queue
         self.stages = {name: StageProgress(name) for name in STAGE_WEIGHTS}
         self.current_stage_name = "transcribe"
         # Initialize current stage with 0 progress (not indeterminate)
@@ -136,6 +137,9 @@ class ProgressTracker:
                     clip_duration = self.stages["render"].last_update - self.stages["render"].start_time
                     self.render_times.append(clip_duration)
                     self.stages["render"].start_time = now  # Reset for next clip
+
+        if self.status_queue is not None:
+            self.status_queue.put(self.get_status_text())
     
     def get_overall_progress(self) -> float:
         """Calculate weighted overall progress (0-1)."""
@@ -244,7 +248,8 @@ def check_ollama_running():
 def run_pipeline(
     input_type, url, local_video, whisper_model, ollama_model,
     aspect_ratio, caption_style, max_clips, min_len, max_len, min_score,
-    tighten, loudnorm, preview, cookies_from_browser=None, progress=gr.Progress()
+    tighten, loudnorm, preview, cookies_from_browser=None, progress=gr.Progress(),
+    status_queue=None
 ):
     """Run the full Chopify pipeline with progress updates."""
     global current_process, stop_requested
@@ -258,7 +263,7 @@ def run_pipeline(
     clips_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize progress tracker
-    tracker = ProgressTracker(progress)
+    tracker = ProgressTracker(progress, status_queue)
     
     # Log callback that also feeds the tracker
     def log(msg):
@@ -635,33 +640,47 @@ def create_ui():
             # Convert "None" string to None for cookies
             browser_cookies = None if cookies_from_browser == "None" else cookies_from_browser
             
-            # Run pipeline and yield progress updates
-            logs = []
-            clips = []
-            
-            # We need to run the pipeline and capture progress updates
-            # The run_pipeline function now uses a tracker that updates the UI
-            # We'll yield the progress status periodically
-            
-            # Create a generator that yields progress updates
+            # Run the blocking pipeline in a worker so this generator can stream status.
+            status_updates = queue.Queue()
+            outcome = {}
+
             def run_with_progress():
-                nonlocal logs, clips
-                # The run_pipeline function now handles progress internally
-                # We'll capture the final results
-                result = run_pipeline(
-                    input_type, url, local_video, whisper_model, llm_model,
-                    aspect_ratio, caption_style, int(max_clips), int(min_len), int(max_len), min_score,
-                    tighten, loudnorm, preview, cookies_from_browser=browser_cookies
-                )
-                logs, clips = result
-                return logs, clips
-            
-            # Run the pipeline
-            try:
-                logs, clips = run_with_progress()
-            except Exception as e:
-                logs = f"Pipeline error: {e}"
-                clips = []
+                try:
+                    outcome["result"] = run_pipeline(
+                        input_type, url, local_video, whisper_model, llm_model,
+                        aspect_ratio, caption_style, int(max_clips), int(min_len), int(max_len), min_score,
+                        tighten, loudnorm, preview, cookies_from_browser=browser_cookies,
+                        status_queue=status_updates
+                    )
+                except Exception as e:
+                    outcome["error"] = e
+
+            worker = threading.Thread(target=run_with_progress, daemon=True)
+            worker.start()
+            latest_status = ""
+            last_yielded_status = None
+            while worker.is_alive() or not status_updates.empty():
+                try:
+                    latest_status = status_updates.get(timeout=0.5)
+                    while True:
+                        latest_status = status_updates.get_nowait()
+                except queue.Empty:
+                    pass
+                if latest_status and latest_status != last_yielded_status:
+                    last_yielded_status = latest_status
+                    yield (
+                        gr.update(visible=False),
+                        gr.update(visible=True),
+                        latest_status,
+                        "",
+                        []
+                    )
+            worker.join()
+
+            if "error" in outcome:
+                logs, clips = f"Pipeline error: {outcome['error']}", []
+            else:
+                logs, clips = outcome.get("result", ("Pipeline ended without a result.", None))
             
             yield (
                 gr.update(visible=True),   # generate_btn
