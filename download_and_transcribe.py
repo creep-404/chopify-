@@ -209,7 +209,14 @@ def prepare_local_video(video_path, workdir):
     return dest.resolve()
 
 
-def _load_whisper_model(model_size, device, compute_type):
+def _is_memory_error(exc):
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "mkl_malloc", "out of memory", "memory allocation", "failed to allocate", "bad_alloc"
+    ))
+
+
+def _load_whisper_model(model_size, device, compute_type, progress_callback=None):
     from faster_whisper import WhisperModel
 
     automatic = device == "auto"
@@ -222,22 +229,46 @@ def _load_whisper_model(model_size, device, compute_type):
             device = "cpu"
         compute_type = "int8_float16" if device == "cuda" else "int8"
 
-    print(f"Loading faster-whisper model={model_size} device={device} "
-          f"compute={compute_type} (first run downloads the model)...", flush=True)
-    try:
-        return WhisperModel(model_size, device=device, compute_type=compute_type), device
-    except Exception as exc:
-        if not automatic or device != "cuda":
-            raise
-        print(f"CUDA model setup failed ({exc}); retrying on CPU int8.", flush=True)
-        return WhisperModel(model_size, device="cpu", compute_type="int8"), "cpu"
+    model_order = ("tiny", "base", "small", "medium", "large-v3")
+    smaller_models = []
+    if model_size in model_order:
+        smaller_models = list(reversed(model_order[:model_order.index(model_size)]))
+
+    candidates = [(model_size, device, compute_type)]
+    if automatic and device == "cuda":
+        candidates.append((model_size, "cpu", "int8"))
+        for size in smaller_models:
+            candidates.extend(((size, "cuda", "int8_float16"), (size, "cpu", "int8")))
+    else:
+        candidates.extend((size, "cpu", "int8") for size in smaller_models)
+
+    for index, (candidate_size, candidate_device, candidate_compute) in enumerate(candidates):
+        print(f"Loading faster-whisper model={candidate_size} device={candidate_device} "
+              f"compute={candidate_compute} (first run downloads the model)...", flush=True)
+        try:
+            model = WhisperModel(candidate_size, device=candidate_device, compute_type=candidate_compute)
+            return model, candidate_device, candidate_size
+        except Exception as exc:
+            if not automatic or index + 1 >= len(candidates):
+                raise
+            next_size, next_device, next_compute = candidates[index + 1]
+            if candidate_device == "cuda" and next_device == "cpu" and next_size == candidate_size:
+                message = f"CUDA model setup failed; retrying {candidate_size} on CPU int8."
+            elif _is_memory_error(exc):
+                message = (f"Not enough memory for {candidate_size} on {candidate_device.upper()}; "
+                           f"retrying with {next_size} on {next_device.upper()} ({next_compute}).")
+            else:
+                raise
+            print(message, flush=True)
+            if progress_callback:
+                progress_callback("transcribe", "loading_model", None, message)
 
 
 def transcribe(video, workdir, model_size, device, compute_type, progress_callback=None):
     if progress_callback:
         progress_callback("transcribe", "loading_model", None, f"Detecting device and loading Whisper model {model_size}...")
-    model, device = _load_whisper_model(model_size, device, compute_type)
-    device_message = f"Whisper transcription is using {device.upper()}."
+    model, device, model_size = _load_whisper_model(model_size, device, compute_type, progress_callback)
+    device_message = f"Whisper model {model_size} is using {device.upper()}."
     print(device_message, flush=True)
     if progress_callback:
         progress_callback("transcribe", "loading_model", None, device_message)

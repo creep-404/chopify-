@@ -545,7 +545,7 @@ def create_ui():
                     choices=WHISPER_MODELS,
                     value="medium",
                     label="Whisper Model",
-                    info="Larger = more accurate, slower. medium is a good balance."
+                    info="Larger = more accurate, slower. Medium is a good balance; auto mode retries smaller models if memory is low."
                 )
                 
                 aspect_ratio = gr.Dropdown(
