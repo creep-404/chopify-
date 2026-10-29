@@ -152,7 +152,7 @@ The UI binds to localhost only (not exposed to LAN) and searches for an availabl
 |---------|-------------|
 | **Video Input** | YouTube/yt-dlp URL **or** local file upload (MP4, MKV, MOV, WebM, etc.) |
 | **AI Scoring** | Dropdown with all local Ollama models (auto-detected via `ollama list`) + built-in heuristic |
-| **Whisper Model** | tiny / base / small / medium / large-v3 (default: medium); automatically tries smaller models if memory is low |
+| **Whisper Model** | tiny / base / small / medium / large-v3 (default: medium); long audio is transcribed in five-minute chunks, with smaller-model fallback if memory is low |
 | **Hardware** | Automatically uses a compatible CUDA GPU when available; otherwise uses CPU with int8. |
 | **Aspect Ratio** | 9:16 (vertical), 16:9 (landscape), 1:1 (square) |
 | **Caption Style** | default, hormozi (red), mrbeast (green), podcast (clean) |

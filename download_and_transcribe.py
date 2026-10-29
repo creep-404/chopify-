@@ -13,6 +13,8 @@ import argparse
 import subprocess
 import shutil
 import os
+import math
+import tempfile
 from pathlib import Path
 
 
@@ -281,35 +283,67 @@ def transcribe(video, workdir, model_size, device, compute_type, progress_callba
         capture_output=True, text=True
     )
     video_duration = float(dur_out.stdout.strip()) if dur_out.stdout.strip() else 0
-    
+    if video_duration <= 0:
+        raise RuntimeError("Could not determine video duration with ffprobe.")
+
+    chunk_seconds = 300
+    chunk_count = math.ceil(video_duration / chunk_seconds)
     if progress_callback:
-        progress_callback("transcribe", "starting", 0.0, f"Starting transcription of {video_duration:.1f}s video...")
-    
-    segments, info = model.transcribe(str(video), word_timestamps=True, vad_filter=True)
-    print(f"Detected language: {info.language} "
-          f"(p={info.language_probability:.2f}), audio {info.duration:.1f}s", flush=True)
+        progress_callback("transcribe", "starting", 0.0,
+                          f"Transcribing {video_duration:.1f}s video in {chunk_count} five-minute chunks...")
 
     seg_list, words = [], []
+    language = None
+    audio_duration = 0.0
     last_progress = 0.0
-    for seg in segments:
-        seg_list.append({"start": seg.start, "end": seg.end, "text": seg.text})
-        for w in (seg.words or []):
-            words.append({"word": w.word, "start": w.start, "end": w.end})
-        print(f"[{seg.start:7.2f} -> {seg.end:7.2f}] {seg.text}", flush=True)
-        
-        # Report transcription progress based on audio position
-        if progress_callback and video_duration > 0:
-            prog = min(seg.end / video_duration, 1.0)
-            # Throttle updates to avoid spam
-            if prog - last_progress >= 0.02 or prog >= 1.0:
-                progress_callback("transcribe", "transcribing", prog, 
-                    f"Transcribing: {seg.end:.1f}/{video_duration:.1f}s")
-                last_progress = prog
+    with tempfile.TemporaryDirectory(prefix="chopify-audio-", dir=workdir) as temp_dir:
+        for chunk_index in range(chunk_count):
+            chunk_start = chunk_index * chunk_seconds
+            chunk_duration = min(chunk_seconds, video_duration - chunk_start)
+            chunk_path = Path(temp_dir) / f"audio-{chunk_index:04d}.wav"
+            if progress_callback:
+                progress_callback("transcribe", "transcribing", chunk_start / video_duration,
+                                  f"Preparing audio chunk {chunk_index + 1}/{chunk_count}...")
+            subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                 "-ss", str(chunk_start), "-i", str(video), "-t", str(chunk_duration),
+                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000",
+                 "-c:a", "pcm_s16le", str(chunk_path)],
+                check=True, capture_output=True, text=True
+            )
+            if progress_callback:
+                progress_callback("transcribe", "transcribing", chunk_start / video_duration,
+                                  f"Transcribing audio chunk {chunk_index + 1}/{chunk_count}...")
+            segments, info = model.transcribe(
+                str(chunk_path), language=language, word_timestamps=True, vad_filter=True
+            )
+            language = language or info.language
+            audio_duration += info.duration
+            print(f"Transcribing chunk {chunk_index + 1}/{chunk_count} on {device.upper()}...", flush=True)
+
+            for seg in segments:
+                start = chunk_start + seg.start
+                end = chunk_start + seg.end
+                seg_list.append({"start": start, "end": end, "text": seg.text})
+                for word in (seg.words or []):
+                    words.append({
+                        "word": word.word,
+                        "start": chunk_start + word.start,
+                        "end": chunk_start + word.end,
+                    })
+                print(f"[{start:7.2f} -> {end:7.2f}] {seg.text}", flush=True)
+
+                prog = min(end / video_duration, 1.0)
+                if progress_callback and (prog - last_progress >= 0.02 or prog >= 1.0):
+                    progress_callback("transcribe", "transcribing", prog,
+                                      f"Transcribing: {end:.1f}/{video_duration:.1f}s")
+                    last_progress = prog
+            del segments, info
 
     transcript = {
         "video": str(video),
-        "language": info.language,
-        "duration": info.duration,
+        "language": language,
+        "duration": audio_duration,
         "model": model_size,
         "segments": seg_list,
         "words": words,
