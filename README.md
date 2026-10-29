@@ -153,6 +153,7 @@ The UI opens at **http://127.0.0.1:7860** (binds to localhost only — not expos
 | **Video Input** | YouTube/yt-dlp URL **or** local file upload (MP4, MKV, MOV, WebM, etc.) |
 | **AI Scoring** | Dropdown with all local Ollama models (auto-detected via `ollama list`) + built-in heuristic |
 | **Whisper Model** | tiny / base / small / medium / large-v3 (default: medium) |
+| **Hardware** | Automatically uses a compatible CUDA GPU when available; otherwise uses CPU with int8. |
 | **Aspect Ratio** | 9:16 (vertical), 16:9 (landscape), 1:1 (square) |
 | **Caption Style** | default, hormozi (red), mrbeast (green), podcast (clean) |
 | **Clip Settings** | Max clips, min/max length, minimum virality score |

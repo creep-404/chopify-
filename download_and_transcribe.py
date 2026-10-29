@@ -209,13 +209,38 @@ def prepare_local_video(video_path, workdir):
     return dest.resolve()
 
 
-def transcribe(video, workdir, model_size, device, compute_type, progress_callback=None):
+def _load_whisper_model(model_size, device, compute_type):
     from faster_whisper import WhisperModel
+
+    automatic = device == "auto"
+    if automatic:
+        try:
+            import ctranslate2
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception as exc:
+            print(f"CUDA detection failed ({exc}); using CPU int8.", flush=True)
+            device = "cpu"
+        compute_type = "int8_float16" if device == "cuda" else "int8"
+
     print(f"Loading faster-whisper model={model_size} device={device} "
           f"compute={compute_type} (first run downloads the model)...", flush=True)
+    try:
+        return WhisperModel(model_size, device=device, compute_type=compute_type), device
+    except Exception as exc:
+        if not automatic or device != "cuda":
+            raise
+        print(f"CUDA model setup failed ({exc}); retrying on CPU int8.", flush=True)
+        return WhisperModel(model_size, device="cpu", compute_type="int8"), "cpu"
+
+
+def transcribe(video, workdir, model_size, device, compute_type, progress_callback=None):
     if progress_callback:
-        progress_callback("transcribe", "loading_model", None, f"Loading Whisper model {model_size}...")
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        progress_callback("transcribe", "loading_model", None, f"Detecting device and loading Whisper model {model_size}...")
+    model, device = _load_whisper_model(model_size, device, compute_type)
+    device_message = f"Whisper transcription is using {device.upper()}."
+    print(device_message, flush=True)
+    if progress_callback:
+        progress_callback("transcribe", "loading_model", None, device_message)
     
     # Get video duration for progress estimation
     import subprocess
@@ -266,13 +291,13 @@ def transcribe(video, workdir, model_size, device, compute_type, progress_callba
     return out
 
 
-def run(workdir, model_size="medium", device="cpu", compute_type="int8", url=None, local_video=None, cookies_from_browser=None, progress_callback=None):
+def run(workdir, model_size="medium", device="auto", compute_type="int8", url=None, local_video=None, cookies_from_browser=None, progress_callback=None):
     """Run stage 1: download/prepare video and transcribe.
     
     Args:
         workdir: Working directory path
         model_size: Whisper model size
-        device: Device to run on (cpu/cuda)
+        device: Device to run on (auto/cpu/cuda)
         compute_type: Compute type (int8/float16)
         url: YouTube URL (optional)
         local_video: Path to local video file (optional)
@@ -307,7 +332,8 @@ def main():
     ap.add_argument("--workdir", default="work")
     ap.add_argument("--model", default="medium",
                     help="faster-whisper model: tiny/base/small/medium/large-v3")
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto",
+                    help="Transcription device (auto selects CUDA when available, otherwise CPU)")
     ap.add_argument("--compute-type", default="int8")
     ap.add_argument("--cookies-from-browser", choices=["firefox", "chrome", "edge", "brave"],
                     help="Extract YouTube cookies from browser (firefox, chrome, edge, brave)")
