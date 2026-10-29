@@ -33,6 +33,7 @@
 ## Features
 
 - **One command** &#8212; `python chopify.py "<link>"` runs the whole pipeline: download &#8594; transcribe &#8594; score &#8594; render.
+- **Local web UI** &#8212; run `python ui.py` or `run_ui.bat` on Windows to open the browser dashboard at `http://127.0.0.1:7860`. Add a local video or URL, choose pipeline settings, track progress, preview clips, and download results.
 - **Built-in AI virality scoring &#8212; no API keys** &#8212; every segment is rated on hook, shock, humour, controversy, insight, emotion, energy and complete-arc. A deterministic heuristic runs out of the box; add `--llm` to use a **local Ollama model** instead. Nothing is ever sent to the cloud.
 - **Complete-thought clips** &#8212; every clip is grown/trimmed to end on a sentence with terminal punctuation. No more clips that start or end mid-thought.
 - **Review workflow** &#8212; scoring prints a numbered candidate table; render only the ones you want with `--clips 1,3,5`.
