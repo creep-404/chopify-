@@ -706,7 +706,7 @@ def main():
     app = create_ui()
     app.launch(
         server_name="127.0.0.1",
-        server_port=7860,
+        server_port=None,
         share=False,
         inbrowser=True,
         show_error=True,

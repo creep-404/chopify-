@@ -1,6 +1,6 @@
 @echo off
 REM Chopify Web UI Launcher for Windows
-REM Activates .venv and starts the Gradio web interface at http://127.0.0.1:7860
+REM Activates .venv and starts Gradio on the first available localhost port.
 
 cd /d "%~dp0"
 
@@ -46,7 +46,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Starting Chopify Web UI...
-echo URL: http://127.0.0.1:7860
+echo Gradio will open the browser at its available local URL.
 echo Press Ctrl+C to stop.
 echo =============================================
 echo.
