@@ -10,6 +10,7 @@ No external/paid APIs. CPU-friendly (int8). Usage:
 import sys
 import json
 import argparse
+import gc
 import subprocess
 import shutil
 import os
@@ -218,11 +219,16 @@ def _is_memory_error(exc):
     ))
 
 
-def _load_whisper_model(model_size, device, compute_type, progress_callback=None):
+def _is_cuda_oom(exc):
+    message = str(exc).lower()
+    return "cuda" in message and "out of memory" in message
+
+
+def _load_whisper_model(model_size, device, compute_type, progress_callback=None, allow_fallback=False):
     from faster_whisper import WhisperModel
 
-    automatic = device == "auto"
-    if automatic:
+    automatic = device == "auto" or allow_fallback
+    if device == "auto":
         try:
             import ctranslate2
             device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
@@ -314,9 +320,37 @@ def transcribe(video, workdir, model_size, device, compute_type, progress_callba
             if progress_callback:
                 progress_callback("transcribe", "transcribing", chunk_start / video_duration,
                                   f"Transcribing audio chunk {chunk_index + 1}/{chunk_count}...")
-            segments, info = model.transcribe(
-                str(chunk_path), language=language, word_timestamps=True, vad_filter=True
-            )
+            segments = info = None
+            cuda_error = None
+            try:
+                segments, info = model.transcribe(
+                    str(chunk_path), language=language, word_timestamps=True, vad_filter=True
+                )
+                segments = list(segments)
+            except Exception as exc:
+                if not (device == "cuda" and _is_cuda_oom(exc)):
+                    raise
+                cuda_error = str(exc)
+
+            if cuda_error:
+                del segments, info, model
+                gc.collect()
+                message = f"CUDA ran out of memory on chunk {chunk_index + 1}; retrying on CPU."
+                print(message, flush=True)
+                if progress_callback:
+                    progress_callback("transcribe", "loading_model", None, message)
+                model, device, model_size = _load_whisper_model(
+                    model_size, "cpu", "int8", progress_callback, allow_fallback=True
+                )
+                device_message = f"Whisper model {model_size} is using CPU after CUDA ran out of memory."
+                print(device_message, flush=True)
+                if progress_callback:
+                    progress_callback("transcribe", "loading_model", None, device_message)
+                segments, info = model.transcribe(
+                    str(chunk_path), language=language, word_timestamps=True, vad_filter=True
+                )
+                segments = list(segments)
+
             language = language or info.language
             audio_duration += info.duration
             print(f"Transcribing chunk {chunk_index + 1}/{chunk_count} on {device.upper()}...", flush=True)
