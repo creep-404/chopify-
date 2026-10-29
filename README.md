@@ -127,6 +127,78 @@ python render_clips.py work --aspect 9:16 --style default --tighten
 
 Output lands in `./clips` by default &#8212; change with `--out DIR` or `$CHOPIFY_OUT`.
 
+## Local Web UI
+
+Chopify includes a **local-only web interface** built with Gradio. No cloud, no external connections — everything runs on your machine.
+
+### Quick Start
+
+**Option 1: One-click launcher (Windows)**
+```bat
+run_ui.bat
+```
+
+**Option 2: Direct Python**
+```bash
+python ui.py
+```
+
+The UI opens at **http://127.0.0.1:7860** (binds to localhost only — not exposed to LAN).
+
+### Web UI Features
+
+| Feature | Description |
+|---------|-------------|
+| **Video Input** | YouTube/yt-dlp URL **or** local file upload (MP4, MKV, MOV, WebM, etc.) |
+| **AI Scoring** | Dropdown with all local Ollama models (auto-detected via `ollama list`) + built-in heuristic |
+| **Whisper Model** | tiny / base / small / medium / large-v3 (default: medium) |
+| **Aspect Ratio** | 9:16 (vertical), 16:9 (landscape), 1:1 (square) |
+| **Caption Style** | default, hormozi (red), mrbeast (green), podcast (clean) |
+| **Clip Settings** | Max clips, min/max length, minimum virality score |
+| **Options** | Remove filler words (`--tighten`), loudnorm (`--loudnorm`), preview drafts (`--preview`) |
+| **Live Progress** | Real-time log: Downloading → Transcribing → Scoring → Rendering clip 1/10... |
+| **Output Gallery** | Video previews, download buttons, clip metadata (duration, score, hook) |
+
+### Local Video Workflow (100% Offline)
+
+1. Click **Local File** radio button
+2. Upload your video (MP4, MKV, MOV, etc.)
+3. Choose settings
+4. Click **Generate Clips**
+5. No internet required — yt-dlp is bypassed entirely
+
+### YouTube Workflow
+
+1. Select **URL** radio button (default)
+2. Paste YouTube link
+3. Choose settings
+4. Click **Generate Clips**
+5. yt-dlp downloads, then pipeline runs locally
+
+### Ollama Integration
+
+- Install Ollama: `winget install Ollama.Ollama` → `ollama serve`
+- Pull a model: `ollama pull qwen2.5:7b` (or your preferred model)
+- The UI auto-detects available models via `ollama list`
+- If Ollama isn't running, the UI shows a clear warning and falls back to the built-in heuristic scorer
+
+### Privacy / Offline Guarantee
+
+The web UI **never sends** your videos, transcripts, prompts, or clips to any external server.
+- Only network call: `yt-dlp` when you explicitly provide a YouTube URL
+- Local video uploads: **100% on-disk, zero network**
+- Ollama runs on `http://localhost:11434` (your machine)
+- Server binds to `127.0.0.1` only — not accessible from LAN
+
+### Requirements (UI)
+
+- Gradio (added to `requirements.txt`)
+- Same as CLI: Python 3.11+, ffmpeg, Ollama (optional)
+
+```bash
+.venv\Scripts\pip install -r requirements.txt
+```
+
 ## FAQ
 
 **What is Chopify?**

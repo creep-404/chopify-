@@ -1,0 +1,4 @@
+FROM hf.co/HauhauCS/Qwen3-4B-2507-Instruct-Uncensored-HauhauCS-Aggressive:Q4_K_M
+
+PARAMETER num_ctx 2048
+PARAMETER num_gpu 99

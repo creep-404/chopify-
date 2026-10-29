@@ -286,8 +286,9 @@ def write_meta(seg, out_path):
 
 
 def render(seg, words, source, W, H, workdir, aspect, out_dir=None, style=DEFAULT_STYLE,
-           do_tighten=False, loudnorm=False, preview=False):
+           do_tighten=False, loudnorm=False, preview=False, progress_callback=None, clip_index=None, total_clips=None):
     out_dir = Path(out_dir) if out_dir else default_out()
+    out_dir.mkdir(parents=True, exist_ok=True)
     full_w, full_h, font_size, margin_v = ASPECTS[aspect]
     if preview:
         # fast 480p-class draft: smaller frame, smaller captions, no poster/meta
@@ -312,11 +313,19 @@ def render(seg, words, source, W, H, workdir, aspect, out_dir=None, style=DEFAUL
         print(f"  tightened: {len(keeps)} keep-ranges, "
               f"{(end - start) - dur:.1f}s removed", flush=True)
         start = 0.0
+    
+    if progress_callback:
+        clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+        progress_callback("render", "preparing", None, f"Preparing clip{clip_info}: {seg.get('hook', 'clip')[:50]}")
+    
     build_ass(cap_words, start, start + dur, out_dir / "_caption.ass",
               tw, th, font_size, margin_v, style)
 
     needs_track = cw < W * 0.95          # real horizontal crop -> track the speaker
     if needs_track:
+        if progress_callback:
+            clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+            progress_callback("render", "tracking", None, f"Tracking speaker{clip_info}...")
         track = smooth_track(detect_track(render_src, start, dur, W, workdir), W, cw)
         build_sendcmd(track, cw, out_dir / "_crop.cmd")
         init_x = max(0, min(int(round(track[0][1] - cw / 2.0)), W - cw))
@@ -328,17 +337,27 @@ def render(seg, words, source, W, H, workdir, aspect, out_dir=None, style=DEFAUL
         mode = "full-frame"
 
     suffix = ".preview" if preview else ""
-    out = out_dir / (sanitize(seg.get("hook", "clip")) + suffix + ".mp4")
+    out_name = sanitize(seg.get("hook", "clip")) + suffix + ".mp4"
+    out = out_dir / out_name
     cmd = ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(render_src),
            "-t", f"{dur:.3f}", "-vf", vf,
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-           "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(out)]
+           "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out_name]
     if loudnorm:
         cmd[cmd.index("-c:v"):cmd.index("-c:v")] = [
             "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]
     print(">", " ".join(cmd), flush=True)
+    
+    if progress_callback:
+        clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+        progress_callback("render", "rendering", None, f"Rendering clip{clip_info} with ffmpeg...")
+    
     subprocess.run(cmd, check=True, cwd=str(out_dir))
-
+    
+    if progress_callback:
+        clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+        progress_callback("render", "post_process", None, f"Post-processing clip{clip_info}...")
+    
     for tmpf in (out_dir / "_caption.ass", out_dir / "_crop.cmd"):
         try:
             tmpf.unlink()
@@ -354,6 +373,9 @@ def render(seg, words, source, W, H, workdir, aspect, out_dir=None, style=DEFAUL
     if preview:
         # drafts skip the poster and metadata - they exist to be eyeballed fast
         print(f"SAVED {out}  ({aspect} {tw}x{th} preview, {mode})", flush=True)
+        if progress_callback:
+            clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+            progress_callback("render", "complete", 1.0, f"Clip{clip_info} saved")
         return out
 
     # poster: a representative still saved next to the clip (<clip>.png)
@@ -365,6 +387,9 @@ def render(seg, words, source, W, H, workdir, aspect, out_dir=None, style=DEFAUL
 
     print(f"SAVED {out}  ({aspect} {tw}x{th}, {mode})  "
           f"+ poster {poster.name} + {meta_path.name}", flush=True)
+    if progress_callback:
+        clip_info = f" ({clip_index}/{total_clips})" if clip_index and total_clips else ""
+        progress_callback("render", "complete", 1.0, f"Clip{clip_info} saved")
     return out
 
 

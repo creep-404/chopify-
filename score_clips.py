@@ -365,7 +365,7 @@ def _nearest(values, t):
 # ----------------------------------------------------------------- run / cli
 
 def run(workdir, llm=None, host=OLLAMA_HOST, min_score=None, max_clips=10,
-        min_len=20, max_len=75, search=None, pick=None):
+        min_len=20, max_len=75, search=None, pick=None, progress_callback=None):
     """Score the transcript in workdir and write workdir/segments.json.
 
     Returns (segments, mode) where mode is 'ollama' or 'heuristic'.
@@ -376,10 +376,15 @@ def run(workdir, llm=None, host=OLLAMA_HOST, min_score=None, max_clips=10,
     data = load_transcript(workdir)
     sentences = sentenceize(data["words"])
     print(f"Transcript: {len(sentences)} sentences over {data['duration']:.0f}s", flush=True)
+    
+    if progress_callback:
+        progress_callback("score", "starting", None, f"Analyzing {len(sentences)} sentences...")
 
     mode = "heuristic"
     segments = None
     if search:
+        if progress_callback:
+            progress_callback("score", "search", None, f"Searching for keywords: {search}")
         segments = search_candidates(sentences, search, min_len, max_len, max_clips)
         if not segments:
             raise SystemExit(
@@ -387,19 +392,23 @@ def run(workdir, llm=None, host=OLLAMA_HOST, min_score=None, max_clips=10,
                 "Try fewer or different keywords.")
         print(f"Keyword search '{search}': {len(segments)} match(es)", flush=True)
     elif llm:
+        if progress_callback:
+            progress_callback("score", "ollama", None, f"Querying Ollama model {llm}...")
         ms = min_score if min_score is not None else 8.0
         segments = ollama_select(data, llm, host, ms, max_clips, min_len, max_len)
         if segments is not None:
             mode = "ollama"
     if segments is None:
+        if progress_callback:
+            progress_callback("score", "heuristic", None, "Running heuristic scoring...")
         ms = min_score if min_score is not None else 6.5
         segments = build_candidates(sentences, min_len, max_len, max_clips)
         segments = [s for s in segments if s["overall"] >= ms]
 
     if not segments:                       # never ship zero clips silently
-        print("No clip reached the threshold - keeping the single best candidate.",
+        print(f"No clip reached the threshold - keeping the best {max_clips} candidate(s).",
               flush=True)
-        segments = build_candidates(sentences, min_len, max_len, 1)
+        segments = build_candidates(sentences, min_len, max_len, max_clips)
 
     segments = pick_segments(segments, pick)
     if not segments:
@@ -412,6 +421,9 @@ def run(workdir, llm=None, host=OLLAMA_HOST, min_score=None, max_clips=10,
     out = workdir / "segments.json"
     out.write_text(json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {out}  (mode={mode}, {len(segments)} clips)", flush=True)
+    if progress_callback:
+        progress_callback("score", "complete", 1.0, f"Scoring complete: {len(segments)} clips selected")
+    return segments, mode
     return segments, mode
 
 
