@@ -310,7 +310,7 @@ def run_pipeline(
         
         if input_type == "URL":
             download_and_transcribe.run(
-                workdir, model_size=whisper_model, device="cuda", compute_type="int8",
+                workdir, model_size=whisper_model, device="auto", compute_type="int8",
                 url=url, local_video=None, cookies_from_browser=cookies_from_browser,
                 progress_callback=tracker.callback
             )
@@ -318,7 +318,7 @@ def run_pipeline(
             # local_video is a Gradio file object with .name attribute
             video_path = local_video.name if hasattr(local_video, 'name') else str(local_video)
             download_and_transcribe.run(
-                workdir, model_size=whisper_model, device="cuda", compute_type="int8",
+                workdir, model_size=whisper_model, device="auto", compute_type="int8",
                 url=None, local_video=video_path,
                 progress_callback=tracker.callback
             )
